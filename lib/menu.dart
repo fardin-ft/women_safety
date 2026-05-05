@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'user.dart';
+import 'login.dart';
 
-class AppDrawer extends StatelessWidget {
+class AppDrawer extends StatefulWidget {
   final int selectedIndex;
   final Function(int) onTabSelected;
 
@@ -12,79 +14,101 @@ class AppDrawer extends StatelessWidget {
   });
 
   @override
+  State<AppDrawer> createState() => _AppDrawerState();
+}
+
+class _AppDrawerState extends State<AppDrawer> {
+  String _userName = "User";
+  String _userEmail = "user@example.com";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _userName = prefs.getString('user_name') ?? "User";
+      _userEmail = prefs.getString('user_email') ?? "user@example.com";
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Drawer(
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          const DrawerHeader(
-            decoration: BoxDecoration(color: Color(0xFFD81B60)),
+          DrawerHeader(
+            decoration: const BoxDecoration(color: Color(0xFFD81B60)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                CircleAvatar(
+                const CircleAvatar(
                   radius: 30,
                   backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=sarah'),
                 ),
-                SizedBox(height: 10),
+                const SizedBox(height: 10),
                 Text(
-                  "Sarah",
-                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  _userName,
+                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                 ),
                 Text(
-                  "sarah@guardian.care",
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                  _userEmail,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
                 ),
               ],
             ),
           ),
           ListTile(
-            leading: Icon(Icons.home, color: selectedIndex == 0 ? const Color(0xFFD81B60) : Colors.grey),
+            leading: Icon(Icons.home, color: widget.selectedIndex == 0 ? const Color(0xFFD81B60) : Colors.grey),
             title: Text(
               'Dashboard',
-              style: TextStyle(color: selectedIndex == 0 ? const Color(0xFFD81B60) : Colors.black),
+              style: TextStyle(color: widget.selectedIndex == 0 ? const Color(0xFFD81B60) : Colors.black),
             ),
-            selected: selectedIndex == 0,
+            selected: widget.selectedIndex == 0,
             onTap: () {
               Navigator.pop(context);
-              onTabSelected(0);
+              widget.onTabSelected(0);
             },
           ),
           ListTile(
-            leading: Icon(Icons.calendar_month, color: selectedIndex == 1 ? const Color(0xFFD81B60) : Colors.grey),
+            leading: Icon(Icons.calendar_month, color: widget.selectedIndex == 1 ? const Color(0xFFD81B60) : Colors.grey),
             title: Text(
               'Cycle Tracker',
-              style: TextStyle(color: selectedIndex == 1 ? const Color(0xFFD81B60) : Colors.black),
+              style: TextStyle(color: widget.selectedIndex == 1 ? const Color(0xFFD81B60) : Colors.black),
             ),
-            selected: selectedIndex == 1,
+            selected: widget.selectedIndex == 1,
             onTap: () {
               Navigator.pop(context);
-              onTabSelected(1);
+              widget.onTabSelected(1);
             },
           ),
           ListTile(
-            leading: Icon(Icons.water_drop, color: selectedIndex == 2 ? const Color(0xFFD81B60) : Colors.grey),
+            leading: Icon(Icons.water_drop, color: widget.selectedIndex == 2 ? const Color(0xFFD81B60) : Colors.grey),
             title: Text(
               'Hydration',
-              style: TextStyle(color: selectedIndex == 2 ? const Color(0xFFD81B60) : Colors.black),
+              style: TextStyle(color: widget.selectedIndex == 2 ? const Color(0xFFD81B60) : Colors.black),
             ),
-            selected: selectedIndex == 2,
+            selected: widget.selectedIndex == 2,
             onTap: () {
               Navigator.pop(context);
-              onTabSelected(2);
+              widget.onTabSelected(2);
             },
           ),
           ListTile(
-            leading: Icon(Icons.location_on, color: selectedIndex == 3 ? const Color(0xFFD81B60) : Colors.grey),
+            leading: Icon(Icons.location_on, color: widget.selectedIndex == 3 ? const Color(0xFFD81B60) : Colors.grey),
             title: Text(
               'SOS Emergency',
-              style: TextStyle(color: selectedIndex == 3 ? const Color(0xFFD81B60) : Colors.black),
+              style: TextStyle(color: widget.selectedIndex == 3 ? const Color(0xFFD81B60) : Colors.black),
             ),
-            selected: selectedIndex == 3,
+            selected: widget.selectedIndex == 3,
             onTap: () {
               Navigator.pop(context);
-              onTabSelected(3);
+              widget.onTabSelected(3);
             },
           ),
           const Divider(),
@@ -97,6 +121,22 @@ class AppDrawer extends StatelessWidget {
                 context,
                 MaterialPageRoute(builder: (context) => const UserProfileScreen()),
               );
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Logout', style: TextStyle(color: Colors.red)),
+            onTap: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool('is_logged_in', false);
+              if (mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (context) => const LoginScreen()),
+                  (route) => false,
+                );
+              }
             },
           ),
         ],
