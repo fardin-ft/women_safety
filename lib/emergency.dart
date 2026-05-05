@@ -136,7 +136,7 @@ class _EmergencyScreenState extends State<EmergencyScreen> {
             children: [
               Expanded(child: _buildQuickAction("Emergency\nServices", "DIAL 911", Icons.phone, const Color(0xFFC62828), () => _makeCall("911"))),
               const SizedBox(width: 16),
-              Expanded(child: _buildQuickAction("Local Police", "DIRECT LINK", Icons.shield, const Color(0xFF121212), () => _makeCall("100"))),
+              Expanded(child: _buildQuickAction("Domestic Abuse", "Women & Child", Icons.shield, const Color(0xFF121212), () => _makeCall("106"))),
             ],
           ),
           const SizedBox(height: 32),

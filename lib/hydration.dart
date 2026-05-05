@@ -50,6 +50,51 @@ class _HydrationScreenState extends State<HydrationScreen> {
     await prefs.setString('hydration_activities', json.encode(_activities));
   }
 
+  void _showCustomIntakeDialog() {
+    final TextEditingController amountController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Custom Intake", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD81B60))),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Enter the amount of water you drank:"),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: "Amount (ml)",
+                border: OutlineInputBorder(),
+                suffixText: "ml",
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD81B60),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              final double? amountMl = double.tryParse(amountController.text);
+              if (amountMl != null && amountMl > 0) {
+                _addWater(amountMl / 1000.0, "Custom Intake", Icons.add_circle);
+              }
+              Navigator.pop(context);
+            },
+            child: const Text("Add"),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _addWater(double amount, String title, IconData icon) {
     setState(() {
       currentIntake += amount;
@@ -215,7 +260,7 @@ class _HydrationScreenState extends State<HydrationScreen> {
 
   Widget _buildCustomIntakeButton() {
     return InkWell(
-      onTap: () => _addWater(0.25, "Custom Intake", Icons.add_circle),
+      onTap: _showCustomIntakeDialog,
       borderRadius: BorderRadius.circular(20),
       child: Container(
         width: double.infinity,
