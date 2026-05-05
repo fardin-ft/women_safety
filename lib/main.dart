@@ -1,17 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart'; //Maps Location
-import 'package:url_launcher/url_launcher.dart'; //Lunch apps like SMS and Phone
-import 'package:shared_preferences/shared_preferences.dart'; // Saved Data on Phone Storage
+import 'package:geolocator/geolocator.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:pedometer/pedometer.dart'; //Count Steps Walked
-import 'dart:async';
 import 'dart:convert';
 import 'cycle.dart';
 import 'hydration.dart';
 import 'emergency.dart';
 import 'user.dart';
 import 'menu.dart';
-import 'login.dart';
 
 void main() {
   runApp(const GuardianCareApp());
@@ -19,11 +16,6 @@ void main() {
 
 class GuardianCareApp extends StatelessWidget {
   const GuardianCareApp({super.key});
-
-  Future<bool> _checkLoginStatus() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool('is_logged_in') ?? false;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,18 +30,7 @@ class GuardianCareApp extends StatelessWidget {
         useMaterial3: true,
         fontFamily: 'Roboto',
       ),
-      home: FutureBuilder<bool>(
-        future: _checkLoginStatus(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Scaffold(body: Center(child: CircularProgressIndicator()));
-          }
-          if (snapshot.data == true) {
-            return const MainNavigation();
-          }
-          return const LoginScreen();
-        },
-      ),
+      home: const MainNavigation(),
     );
   }
 }
@@ -153,10 +134,10 @@ class ActivityReportScreen extends StatelessWidget {
           children: [
             const Text("Weekly Activity", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             const SizedBox(height: 20),
-            _buildActivityMetric("Steps", "3,432 total", 0.68, Colors.pink),
-            _buildActivityMetric("Walking Minutes", "42 mins", 0.42, Colors.purple),
-            _buildActivityMetric("Calories Burned", "150 kcal", 0.5, Colors.blue),
-            _buildActivityMetric("Daily Goal", "5,000 steps", 0.68, Colors.green),
+            _buildActivityMetric("Steps", "58,432 total", 0.8, Colors.pink),
+            _buildActivityMetric("Active Minutes", "320 mins", 0.6, Colors.purple),
+            _buildActivityMetric("Sleep Quality", "82% average", 0.82, Colors.blue),
+            _buildActivityMetric("Safety Checkins", "45 successful", 1.0, Colors.green),
             const SizedBox(height: 40),
             Container(
               padding: const EdgeInsets.all(20),
@@ -171,7 +152,7 @@ class ActivityReportScreen extends StatelessWidget {
                   Text("Monthly Insights", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   SizedBox(height: 12),
                   Text(
-                    "• Your activity levels are stable this week.\n• You tend to be most active during afternoon walks.\n• Consistency in reaching your daily goal is improving.",
+                    "• Your activity levels are 12% higher than last week.\n• You tend to be most active between 5 PM and 7 PM.\n• Sleep consistency has improved by 5 days this month.",
                     style: TextStyle(color: Colors.black87, height: 1.6),
                   ),
                 ],
@@ -230,45 +211,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _currentIntake = 0.0;
   double _dailyGoal = 2.5;
 
-  // Activity Logic Variables
-  late Stream<StepCount> _stepCountStream;
-  int _stepsWalked = 0;
-  int _walkingMins = 0;
-  int _caloriesBurned = 0;
-  int _stepGoal = 5000;
-
   @override
   void initState() {
     super.initState();
     _loadUserData();
-    _initPedometer();
     _requestPermissions();
-  }
-
-  void _initPedometer() {
-    _stepCountStream = Pedometer.stepCountStream;
-    _stepCountStream.listen(_onStepCount).onError(_onStepCountError);
-  }
-
-  void _onStepCount(StepCount event) {
-    setState(() {
-      _stepsWalked = event.steps;
-      // Simple estimation: 1000 steps ~ 10 mins and 40 calories
-      _walkingMins = (_stepsWalked / 100).round();
-      _caloriesBurned = (_stepsWalked * 0.04).round();
-    });
-    _saveActivityData();
-  }
-
-  void _onStepCountError(error) {
-    debugPrint('Pedometer Error: $error');
-  }
-
-  Future<void> _saveActivityData() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('steps_walked', _stepsWalked);
-    await prefs.setInt('walking_mins', _walkingMins);
-    await prefs.setInt('calories_burned', _caloriesBurned);
   }
 
   @override
@@ -281,7 +228,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await [
       Permission.location,
       Permission.sms,
-      Permission.activityRecognition,
     ].request();
   }
 
@@ -298,13 +244,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _lastPeriodDate = DateTime.parse(dateStr);
       }
       _cycleLength = prefs.getInt('cycle_length') ?? 28;
-
-      // Activity stats
-      _stepsWalked = prefs.getInt('steps_walked') ?? 3432;
-      _walkingMins = prefs.getInt('walking_mins') ?? 42;
-      _caloriesBurned = prefs.getInt('calories_burned') ?? 150;
-      _stepGoal = prefs.getInt('step_goal') ?? 5000;
-
       String? lastHydrationDate = prefs.getString('last_hydration_date');
       String today = DateTime.now().toIso8601String().split('T')[0];
       if (lastHydrationDate == today) {
@@ -426,6 +365,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 "Today's Summary",
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => const ActivityReportScreen()),
+                  );
+                },
+                child: const Text("View All", style: TextStyle(color: Color(0xFFD81B60))),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -437,10 +385,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             crossAxisSpacing: 12,
             childAspectRatio: 1.5,
             children: [
-              _buildSummaryItem(Icons.directions_walk, _stepsWalked.toString(), "STEPS WALKED", Colors.pink[50]!, Colors.pink),
-              _buildSummaryItem(Icons.timer, "$_walkingMins", "MINS", Colors.purple[50]!, Colors.purple),
-              _buildSummaryItem(Icons.local_fire_department, "$_caloriesBurned", "CALORIES", Colors.blue[50]!, Colors.blue),
-              _buildSummaryItem(Icons.flag, "$_stepsWalked/$_stepGoal", "GOAL", Colors.green[50]!, Colors.green),
+              _buildSummaryItem(Icons.directions_walk, "8,432", "STEPS WALKED", Colors.pink[50]!, Colors.pink),
+              _buildSummaryItem(Icons.fitness_center, "42", "ACTIVE MINS", Colors.purple[50]!, Colors.purple),
+              _buildSummaryItem(Icons.nights_stay, "7h 20m", "REST QUALITY", Colors.blue[50]!, Colors.blue),
+              _buildSummaryItem(Icons.shield, "12", "SAFETY CHECKINS", Colors.green[50]!, Colors.green),
             ],
           ),
           const SizedBox(height: 24),

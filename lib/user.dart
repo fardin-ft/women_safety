@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'login.dart';
 
 class UserProfileScreen extends StatefulWidget {
   const UserProfileScreen({super.key});
@@ -178,39 +177,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
             _buildEmergencyContactInfo(),
             const SizedBox(height: 16),
             _buildHealthProfile(),
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('is_logged_in', false);
-                    if (mounted) {
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(builder: (context) => const LoginScreen()),
-                        (route) => false,
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.logout),
-                  label: const Text("Logout", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red[50],
-                    foregroundColor: Colors.red,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: Colors.red.withOpacity(0.2)),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 40),
+            const SizedBox(height: 32),
           ],
         ),
       ),
@@ -259,7 +226,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
         ),
         const Text(
-          "Premium Member since 2026",
+          "Premium Member since 2023",
           style: TextStyle(color: Colors.grey, fontSize: 14),
         ),
       ],
