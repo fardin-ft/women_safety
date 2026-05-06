@@ -20,10 +20,17 @@ class AppDrawer extends StatefulWidget {
 class _AppDrawerState extends State<AppDrawer> {
   String _userName = "User";
   String _userEmail = "user@example.com";
+  String _userMascot = "https://i.pravatar.cc/150?u=sarah";
 
   @override
   void initState() {
     super.initState();
+    _loadUserData();
+  }
+
+  @override
+  void didUpdateWidget(covariant AppDrawer oldWidget) {
+    super.didUpdateWidget(oldWidget);
     _loadUserData();
   }
 
@@ -32,6 +39,7 @@ class _AppDrawerState extends State<AppDrawer> {
     setState(() {
       _userName = prefs.getString('user_name') ?? "User";
       _userEmail = prefs.getString('user_email') ?? "user@example.com";
+      _userMascot = prefs.getString('user_mascot') ?? "https://i.pravatar.cc/150?u=sarah";
     });
   }
 
@@ -47,9 +55,9 @@ class _AppDrawerState extends State<AppDrawer> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                const CircleAvatar(
+                CircleAvatar(
                   radius: 30,
-                  backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=sarah'),
+                  backgroundImage: NetworkImage(_userMascot),
                 ),
                 const SizedBox(height: 10),
                 Text(
@@ -120,7 +128,12 @@ class _AppDrawerState extends State<AppDrawer> {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (context) => const UserProfileScreen()),
-              );
+              ).then((result) {
+                _loadUserData();
+                if (result == "open_cycle") {
+                  widget.onTabSelected(1);
+                }
+              });
             },
           ),
           const Divider(),

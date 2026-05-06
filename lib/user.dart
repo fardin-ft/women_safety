@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'login.dart';
+import 'database_helper.dart';
+import 'cycle.dart';
+import 'menu.dart';
 
 class UserProfileScreen extends StatefulWidget {
   const UserProfileScreen({super.key});
@@ -10,206 +13,160 @@ class UserProfileScreen extends StatefulWidget {
 }
 
 class _UserProfileScreenState extends State<UserProfileScreen> {
-  bool _biometricEnabled = true;
-  
-  // Profile Data
-  String _name = "Sarah";
-  String _email = "sarah.j@example.com";
-  String _phone = "+1 (555) 012-3456";
-  
-  // Health Data
-  String _bloodType = "O+";
-  String _allergies = "Peanuts";
-  String _meds = "None";
-  String _weight = "64 kg";
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  bool _isLoading = true;
+  int? _currentUserId;
+
+  String _name = "User";
+  String _email = "No email";
+  String _phone = "";
+  String _mascot = "https://i.pravatar.cc/150?u=sarah"; // Default mascot
+  String _bloodType = "";
+  String _weight = "";
+  String _height = "";
+  String _emergency1 = "";
+  String _emergency2 = "";
+
+  final List<String> _mascotOptions = [
+    "https://i.pravatar.cc/150?u=sarah",
+    "https://i.pravatar.cc/150?u=2",
+    "https://i.pravatar.cc/150?u=3",
+    "https://i.pravatar.cc/150?u=4",
+  ];
+
+  // Cycle summary data
+  int _daysLeft = 0;
+  int _cycleDay = 1;
 
   @override
   void initState() {
     super.initState();
-    _loadUserData();
+    _loadAllData();
   }
 
-  Future<void> _loadUserData() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _name = prefs.getString('user_name') ?? "Sarah";
-      _email = prefs.getString('user_email') ?? "sarah.j@example.com";
-      _phone = prefs.getString('user_phone') ?? "+1 (555) 012-3456";
-      _bloodType = prefs.getString('user_blood_type') ?? "O+";
-      _allergies = prefs.getString('user_allergies') ?? "Peanuts";
-      _meds = prefs.getString('user_meds') ?? "None";
-      _weight = prefs.getString('user_weight') ?? "64 kg";
-      _biometricEnabled = prefs.getBool('biometric_enabled') ?? true;
-    });
+  Future<void> _loadAllData() async {
+    setState(() => _isLoading = true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _currentUserId = prefs.getInt('user_id');
+
+      if (_currentUserId != null) {
+        final userData = await _dbHelper.getUser(_currentUserId!);
+        if (userData != null) {
+          _name = userData['name'] ?? "User";
+          _email = userData['email'] ?? "No email";
+          _phone = userData['phone'] ?? "";
+          if (userData['mascot'] != null && userData['mascot'].isNotEmpty) {
+            _mascot = userData['mascot'];
+          }
+          // Update SharedPreferences for the drawer
+          await prefs.setString('user_name', _name);
+          await prefs.setString('user_email', _email);
+          await prefs.setString('user_mascot', _mascot);
+        }
+
+        final personalInfo = await _dbHelper.getPersonalInfo(_currentUserId!);
+        if (personalInfo != null) {
+          _bloodType = personalInfo['blood_group'] ?? "";
+          _weight = personalInfo['weight']?.toString() ?? "";
+          _height = personalInfo['height']?.toString() ?? "";
+          _emergency1 = personalInfo['emergency_number1'] ?? "";
+          _emergency2 = personalInfo['emergency_number2'] ?? "";
+        }
+
+        // Fetch Cycle Info for Summary
+        final cycleData = await _dbHelper.getCycleInfo(_currentUserId!);
+        if (cycleData != null) {
+          DateTime lastDate = DateTime.parse(cycleData['last_period_date']);
+          int cycleLen = cycleData['cycle_length'] ?? 28;
+          int diff = DateTime.now().difference(lastDate).inDays;
+          _cycleDay = (diff % cycleLen) + 1;
+          _daysLeft = cycleLen - (diff % cycleLen);
+        }
+      }
+    } catch (e) {
+      debugPrint("Error loading profile: $e");
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
 
-  Future<void> _saveUserData() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('user_name', _name);
-    await prefs.setString('user_email', _email);
-    await prefs.setString('user_phone', _phone);
-    await prefs.setString('user_blood_type', _bloodType);
-    await prefs.setString('user_allergies', _allergies);
-    await prefs.setString('user_meds', _meds);
-    await prefs.setString('user_weight', _weight);
-    await prefs.setBool('biometric_enabled', _biometricEnabled);
+  Future<void> _savePersonalInfo() async {
+    if (_currentUserId == null) return;
+    try {
+      Map<String, dynamic> info = {
+        'user_id': _currentUserId,
+        'blood_group': _bloodType,
+        'weight': double.tryParse(_weight) ?? 0.0,
+        'height': double.tryParse(_height) ?? 0.0,
+        'emergency_number1': _emergency1,
+        'emergency_number2': _emergency2,
+      };
+      await _dbHelper.savePersonalInfo(info);
+      _loadAllData();
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Info updated")));
+    } catch (e) {
+      debugPrint("Error: $e");
+    }
   }
 
-  void _showEditProfileDialog() {
-    final nameController = TextEditingController(text: _name);
-    final emailController = TextEditingController(text: _email);
-    final phoneController = TextEditingController(text: _phone);
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Edit Profile", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD81B60))),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: nameController, decoration: const InputDecoration(labelText: "Full Name")),
-              TextField(controller: emailController, decoration: const InputDecoration(labelText: "Email Address")),
-              TextField(controller: phoneController, decoration: const InputDecoration(labelText: "Phone Number")),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD81B60), foregroundColor: Colors.white),
-            onPressed: () {
-              setState(() {
-                _name = nameController.text;
-                _email = emailController.text;
-                _phone = phoneController.text;
-              });
-              _saveUserData();
-              Navigator.pop(context);
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEditHealthDialog() {
-    final bloodController = TextEditingController(text: _bloodType);
-    final allergiesController = TextEditingController(text: _allergies);
-    final medsController = TextEditingController(text: _meds);
-    final weightController = TextEditingController(text: _weight);
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Health Profile", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD81B60))),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: bloodController, decoration: const InputDecoration(labelText: "Blood Type")),
-              TextField(controller: allergiesController, decoration: const InputDecoration(labelText: "Allergies")),
-              TextField(controller: medsController, decoration: const InputDecoration(labelText: "Medications")),
-              TextField(controller: weightController, decoration: const InputDecoration(labelText: "Weight")),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD81B60), foregroundColor: Colors.white),
-            onPressed: () {
-              setState(() {
-                _bloodType = bloodController.text;
-                _allergies = allergiesController.text;
-                _meds = medsController.text;
-                _weight = weightController.text;
-              });
-              _saveUserData();
-              Navigator.pop(context);
-            },
-            child: const Text("Save"),
-          ),
-        ],
-      ),
-    );
+  Future<void> _saveProfile() async {
+    if (_currentUserId == null) return;
+    try {
+      await _dbHelper.updateProfile(_currentUserId!, _name, _email, _phone);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_name', _name);
+      await prefs.setString('user_email', _email);
+      _loadAllData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Profile updated")));
+      }
+    } catch (e) {
+      debugPrint("Error updating profile: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: const Color(0xFFFFF9FA),
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        centerTitle: false,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'GuardianCare',
-          style: TextStyle(color: Color(0xFFD81B60), fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Profile', style: TextStyle(color: Color(0xFFD81B60), fontWeight: FontWeight.bold)),
+        leading: IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black), onPressed: () => Navigator.pop(context)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.person_add, color: Color(0xFFD81B60)),
-            onPressed: () {
-              setState(() {
-                _name = "New User";
-                _email = "";
-                _phone = "";
-              });
-              _showEditProfileDialog();
+            icon: const Icon(Icons.logout, color: Color(0xFFE55F81)),
+            onPressed: () async {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.clear();
+              if (mounted) Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const LoginScreen()), (r) => false);
             },
           )
         ],
       ),
       body: SingleChildScrollView(
-        physics: const ClampingScrollPhysics(),
-        padding: const EdgeInsets.all(16.0),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Column(
           children: [
+            const SizedBox(height: 10),
             _buildProfileHeader(),
-            const SizedBox(height: 32),
-            _buildPersonalDetails(),
-            const SizedBox(height: 16),
-            _buildEmergencyContactInfo(),
-            const SizedBox(height: 16),
-            _buildHealthProfile(),
-            const SizedBox(height: 24),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton.icon(
-                  onPressed: () async {
-                    final prefs = await SharedPreferences.getInstance();
-                    await prefs.setBool('is_logged_in', false);
-                    if (mounted) {
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(builder: (context) => const LoginScreen()),
-                        (route) => false,
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.logout),
-                  label: const Text("Logout", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red[50],
-                    foregroundColor: Colors.red,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: Colors.red.withOpacity(0.2)),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            const SizedBox(height: 30),
+            _buildCycleSummaryCard(),
+            const SizedBox(height: 20),
+            _buildInfoSection("Health Profile", Icons.favorite, [
+              _buildSimpleDetail("Blood Type", _bloodType.isEmpty ? "Not set" : _bloodType),
+              _buildSimpleDetail("Weight", _weight.isEmpty ? "Not set" : "$_weight kg"),
+              _buildSimpleDetail("Height", _height.isEmpty ? "Not set" : "$_height cm"),
+            ], onEdit: _showEditHealthDialog),
+            const SizedBox(height: 20),
+            _buildInfoSection("Emergency Contacts", Icons.emergency, [
+              _buildSimpleDetail("Primary", _emergency1.isEmpty ? "None" : _emergency1),
+              _buildSimpleDetail("Secondary", _emergency2.isEmpty ? "None" : _emergency2),
+            ], onEdit: _showEmergencyDialog),
             const SizedBox(height: 40),
           ],
         ),
@@ -220,59 +177,215 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Widget _buildProfileHeader() {
     return Column(
       children: [
-        Stack(
-          alignment: Alignment.bottomRight,
+        GestureDetector(
+          onTap: _showMascotPicker,
+          child: Stack(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: const BoxDecoration(color: Color(0xFFE55F81), shape: BoxShape.circle),
+                child: CircleAvatar(
+                  radius: 50,
+                  backgroundColor: Colors.white,
+                  backgroundImage: NetworkImage(_mascot),
+                ),
+              ),
+              Positioned(
+                bottom: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(color: Color(0xFFD81B60), shape: BoxShape.circle),
+                  child: const Icon(Icons.camera_alt, color: Colors.white, size: 18),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 15),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white, width: 4),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 15,
-                    spreadRadius: 2,
-                  ),
+            const SizedBox(width: 40),
+            Text(_name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+            IconButton(
+              icon: const Icon(Icons.edit, size: 20, color: Color(0xFFD81B60)),
+              onPressed: _showEditProfileDialog,
+            )
+          ],
+        ),
+        Text(_email, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+        if (_phone.isNotEmpty) Text(_phone, style: const TextStyle(color: Colors.grey, fontSize: 14)),
+      ],
+    );
+  }
+
+  void _showEditProfileDialog() {
+    final nameController = TextEditingController(text: _name);
+    final emailController = TextEditingController(text: _email);
+    final phoneController = TextEditingController(text: _phone);
+    final formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Edit Profile"),
+        content: SingleChildScrollView(
+          child: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: nameController,
+                  decoration: const InputDecoration(labelText: "Full Name"),
+                  validator: (value) => value == null || value.isEmpty ? "Name is required" : null,
+                ),
+                TextFormField(
+                  controller: emailController,
+                  decoration: const InputDecoration(labelText: "Email"),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) return "Email is required";
+                    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) return "Enter a valid email";
+                    return null;
+                  },
+                ),
+                TextFormField(
+                  controller: phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: "Phone Number"),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) return "Phone number is required";
+                    if (!RegExp(r'^\+?[0-9]{10,15}$').hasMatch(value)) return "Enter a valid phone number";
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              if (formKey.currentState!.validate()) {
+                setState(() {
+                  _name = nameController.text;
+                  _email = emailController.text;
+                  _phone = phoneController.text;
+                });
+                await _saveProfile();
+                if (mounted) Navigator.pop(context);
+              }
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMascotPicker() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text("Choose Your Mascot", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 20),
+              GridView.builder(
+                shrinkWrap: true,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                ),
+                itemCount: _mascotOptions.length,
+                itemBuilder: (context, index) {
+                  return GestureDetector(
+                    onTap: () async {
+                      if (_currentUserId != null) {
+                        await _dbHelper.updateMascot(_currentUserId!, _mascotOptions[index]);
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.setString('user_mascot', _mascotOptions[index]);
+                        setState(() {
+                          _mascot = _mascotOptions[index];
+                        });
+                        Navigator.pop(context);
+                      }
+                    },
+                    child: Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(
+                          color: _mascot == _mascotOptions[index] ? const Color(0xFFD81B60) : Colors.transparent,
+                          width: 3,
+                        ),
+                        shape: BoxShape.circle,
+                      ),
+                      child: CircleAvatar(
+                        backgroundImage: NetworkImage(_mascotOptions[index]),
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCycleSummaryCard() {
+    return GestureDetector(
+      onTap: () {
+        // Pop back to main navigation and switch to cycle tab
+        Navigator.pop(context, "open_cycle");
+      },
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE55F81),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [BoxShadow(color: const Color(0xFFE55F81).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("CURRENT CYCLE", style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 5),
+                  Text("$_daysLeft Days Left", style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                  const Text("Tap to view full cycle tracker", style: TextStyle(color: Colors.white60, fontSize: 11)),
                 ],
               ),
-              child: const CircleAvatar(
-                radius: 60,
-                backgroundImage: NetworkImage('https://i.pravatar.cc/150?u=sarah'),
-              ),
             ),
-            GestureDetector(
-              onTap: _showEditProfileDialog,
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFD81B60),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.edit, color: Colors.white, size: 16),
-              ),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
+              child: Text("$_cycleDay", style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        Text(
-          _name,
-          style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-        ),
-        const Text(
-          "Premium Member since 2026",
-          style: TextStyle(color: Colors.grey, fontSize: 14),
-        ),
-      ],
+      ),
     );
   }
 
-  Widget _buildPersonalDetails() {
+  Widget _buildInfoSection(String title, IconData icon, List<Widget> details, {required VoidCallback onEdit}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -280,216 +393,162 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.person, color: Color(0xFFD81B60), size: 20),
-                  SizedBox(width: 12),
-                  Text(
-                    "Personal Details",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              IconButton(onPressed: _showEditProfileDialog, icon: const Icon(Icons.edit, size: 18, color: Colors.grey)),
+              Row(children: [Icon(icon, color: const Color(0xFFE55F81), size: 18), const SizedBox(width: 10), Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16))]),
+              IconButton(onPressed: onEdit, icon: const Icon(Icons.edit, size: 16, color: Colors.grey)),
             ],
           ),
-          const SizedBox(height: 20),
-          _buildDetailField("EMAIL ADDRESS", _email),
-          const SizedBox(height: 12),
-          _buildDetailField("PHONE NUMBER", _phone),
+          const Divider(height: 20),
+          ...details,
         ],
       ),
     );
   }
 
-  Widget _buildDetailField(String label, String value) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FA),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold, letterSpacing: 1.1),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmergencyContactInfo() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.emergency, color: Color(0xFF9C27B0), size: 20),
-              SizedBox(width: 12),
-              Text(
-                "Emergency Contact Info",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          _buildContactCard("Marcus Johnson", "Partner • +1 (555) 098-7654", const Color(0xFFFFF1F8), const Color(0xFF9C27B0)),
-          const SizedBox(height: 12),
-          _buildContactCard("Elena Smith", "Mother • +1 (555) 234-5678", const Color(0xFFF8F9FA), Colors.grey),
-          const SizedBox(height: 20),
-          OutlinedButton(
-            onPressed: () {},
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 50),
-              side: BorderSide(color: Colors.grey[200]!, style: BorderStyle.solid),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            ),
-            child: const Text("+ Add New Contact", style: TextStyle(color: Colors.grey, fontSize: 13)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildContactCard(String name, String details, Color bgColor, Color iconColor) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
+  Widget _buildSimpleDetail(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              Text(details, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-            ],
-          ),
-          Icon(Icons.phone, color: iconColor, size: 20),
+          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 13)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
         ],
       ),
     );
   }
 
-  Widget _buildHealthProfile() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Row(
-                children: [
-                  Icon(Icons.favorite, color: Color(0xFFD81B60), size: 20),
-                  SizedBox(width: 12),
-                  Text(
-                    "Health Profile",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              TextButton(
-                onPressed: _showEditHealthDialog,
-                child: const Text("Edit Details", style: TextStyle(color: Color(0xFFD81B60), fontSize: 12, fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            mainAxisSpacing: 12,
-            crossAxisSpacing: 12,
-            childAspectRatio: 1.5,
-            children: [
-              _buildHealthItem(Icons.water_drop, "BLOOD TYPE", _bloodType, const Color(0xFFFCE4EC)),
-              _buildHealthItem(Icons.warning, "ALLERGIES", _allergies, const Color(0xFFF8F9FA)),
-              _buildHealthItem(Icons.medication, "MEDS", _meds, const Color(0xFFF8F9FA)),
-              _buildHealthItem(Icons.height, "WEIGHT", _weight, const Color(0xFFF8F9FA)),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
+  void _showEditHealthDialog() {
+    String? selectedBloodType = _bloodType.isEmpty ? null : _bloodType;
+    const bloodGroups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
+    if (selectedBloodType != null && !bloodGroups.contains(selectedBloodType)) {
+      selectedBloodType = null;
+    }
 
-  Widget _buildHealthItem(IconData icon, String label, String value, Color bgColor) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: const Color(0xFFD81B60), size: 20),
-          const SizedBox(height: 8),
-          Text(label, style: const TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
-          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
+    final weightController = TextEditingController(text: _weight);
+    final heightController = TextEditingController(text: _height);
+    final formKey = GlobalKey<FormState>();
 
-  Widget _buildSettingsTile(IconData icon, String title, String? subtitle, Color iconBgColor, {Widget? trailing, Color? textColor}) {
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: iconBgColor,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(icon, color: const Color(0xFFD81B60), size: 20),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  color: textColor ?? Colors.black,
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text("Health Profile"),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  value: selectedBloodType,
+                  decoration: const InputDecoration(labelText: "Blood Type"),
+                  items: bloodGroups.map((String type) {
+                    return DropdownMenuItem<String>(value: type, child: Text(type));
+                  }).toList(),
+                  onChanged: (value) => setDialogState(() => selectedBloodType = value),
+                  validator: (value) => value == null ? "Required" : null,
                 ),
+                TextFormField(
+                  controller: weightController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Weight (kg)"),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) return "Required";
+                    final n = double.tryParse(value);
+                    if (n == null || n <= 0 || n > 300) return "Invalid weight";
+                    return null;
+                  },
+                ),
+                TextFormField(
+                  controller: heightController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(labelText: "Height (cm)"),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) return "Required";
+                    final n = double.tryParse(value);
+                    if (n == null || n <= 0 || n > 250) return "Invalid height";
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  setState(() {
+                    _bloodType = selectedBloodType ?? "";
+                    _weight = weightController.text;
+                    _height = heightController.text;
+                  });
+                  _savePersonalInfo();
+                  Navigator.pop(context);
+                }
+              },
+              child: const Text("Save"),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showEmergencyDialog() {
+    final e1Controller = TextEditingController(text: _emergency1);
+    final e2Controller = TextEditingController(text: _emergency2);
+    final formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("Emergency Contacts"),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: e1Controller,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: "Primary Contact"),
+                validator: (value) {
+                  if (value == null || value.isEmpty) return "Primary contact required";
+                  if (!RegExp(r'^\+?[0-9]{10,15}$').hasMatch(value)) return "Invalid number";
+                  return null;
+                },
               ),
-              if (subtitle != null)
-                Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+              TextFormField(
+                controller: e2Controller,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(labelText: "Secondary Contact (Optional)"),
+                validator: (value) {
+                  if (value != null && value.isNotEmpty) {
+                    if (!RegExp(r'^\+?[0-9]{10,15}$').hasMatch(value)) return "Invalid number";
+                  }
+                  return null;
+                },
+              ),
             ],
           ),
         ),
-        trailing ?? const SizedBox.shrink(),
-      ],
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                setState(() {
+                  _emergency1 = e1Controller.text;
+                  _emergency2 = e2Controller.text;
+                });
+                _savePersonalInfo();
+                Navigator.pop(context);
+              }
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
     );
   }
 }

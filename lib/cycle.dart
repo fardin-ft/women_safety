@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:math';
+import 'database_helper.dart';
+import 'menu.dart';
 
 class CycleScreen extends StatefulWidget {
   const CycleScreen({super.key});
@@ -10,511 +11,510 @@ class CycleScreen extends StatefulWidget {
 }
 
 class _CycleScreenState extends State<CycleScreen> {
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  int? _userId;
   DateTime _lastPeriodDate = DateTime.now().subtract(const Duration(days: 22));
   int _cycleLength = 28;
   int _periodLength = 5;
-  
+  List<Map<String, dynamic>> _pastPeriods = [];
+  bool _isLoading = true;
+
+  late TextEditingController _cycleController;
+  late TextEditingController _periodController;
+
   @override
   void initState() {
     super.initState();
-    _loadCycleData();
+    _cycleController = TextEditingController(text: _cycleLength.toString());
+    _periodController = TextEditingController(text: _periodLength.toString());
+    _loadAllData();
   }
 
-  Future<void> _loadCycleData() async {
+  @override
+  void dispose() {
+    _cycleController.dispose();
+    _periodController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAllData() async {
+    setState(() => _isLoading = true);
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      String? dateStr = prefs.getString('last_period_date');
-      if (dateStr != null) {
-        _lastPeriodDate = DateTime.parse(dateStr);
+    _userId = prefs.getInt('user_id');
+
+    if (_userId != null) {
+      final data = await _dbHelper.getCycleInfo(_userId!);
+      if (data != null) {
+        _lastPeriodDate = DateTime.parse(data['last_period_date']);
+        _cycleLength = data['cycle_length'] ?? 28;
+        _periodLength = data['period_length'] ?? 5;
+        _cycleController.text = _cycleLength.toString();
+        _periodController.text = _periodLength.toString();
       }
-      _cycleLength = prefs.getInt('cycle_length') ?? 28;
-      _periodLength = prefs.getInt('period_length') ?? 5;
-    });
-  }
-
-  Future<void> _savePeriodDate(DateTime date) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('last_period_date', date.toIso8601String());
-    setState(() {
-      _lastPeriodDate = date;
-    });
+      _pastPeriods = await _dbHelper.getPeriods(_userId!);
+    }
+    setState(() => _isLoading = false);
   }
 
   int get _currentDay {
-    final difference = DateTime.now().difference(_lastPeriodDate).inDays;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final last = DateTime(_lastPeriodDate.year, _lastPeriodDate.month, _lastPeriodDate.day);
+    final difference = today.difference(last).inDays;
     return (difference % _cycleLength) + 1;
   }
 
   int get _daysUntilNextPeriod {
-    int days = _cycleLength - _currentDay;
-    return days < 0 ? 0 : days;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final last = DateTime(_lastPeriodDate.year, _lastPeriodDate.month, _lastPeriodDate.day);
+    int diff = today.difference(last).inDays;
+    int dayOfCycle = (diff % _cycleLength + _cycleLength) % _cycleLength;
+    if (dayOfCycle < _periodLength) return 0;
+    return _cycleLength - dayOfCycle;
   }
 
-  String get _currentPhase {
-    int day = _currentDay;
-    if (day <= _periodLength) return "Menstrual Phase";
-    if (day <= 13) return "Follicular Phase";
-    if (day <= 15) return "Ovulatory Phase";
-    return "Luteal Phase";
+  DateTime get _nextPeriodDate => _lastPeriodDate.add(Duration(days: _cycleLength));
+  DateTime get _nextFertileDate => _lastPeriodDate.add(Duration(days: _cycleLength - 14));
+
+  double get _avgPeriod {
+    if (_pastPeriods.isEmpty) return _periodLength.toDouble();
+    double sum = 0;
+    for (var p in _pastPeriods) {
+      final start = DateTime.parse(p['start_date']);
+      final end = DateTime.parse(p['end_date']);
+      sum += end.difference(start).inDays + 1;
+    }
+    return sum / _pastPeriods.length;
   }
 
-  Color get _phaseColor {
-    int day = _currentDay;
-    if (day <= _periodLength) return const Color(0xFFD81B60);
-    if (day <= 15) return const Color(0xFF9C27B0);
-    return const Color(0xFFCE93D8);
+  double get _avgCycle {
+    if (_pastPeriods.length < 2) return _cycleLength.toDouble();
+    double sum = 0;
+    for (int i = 0; i < _pastPeriods.length - 1; i++) {
+      final current = DateTime.parse(_pastPeriods[i]['start_date']);
+      final previous = DateTime.parse(_pastPeriods[i + 1]['start_date']);
+      sum += current.difference(previous).inDays;
+    }
+    return sum / (_pastPeriods.length - 1);
+  }
+
+  bool _isOverlapping(DateTime start, DateTime end) {
+    final s = DateTime(start.year, start.month, start.day);
+    final e = DateTime(end.year, end.month, end.day);
+    for (var period in _pastPeriods) {
+      final existingStart = DateTime.parse(period['start_date']);
+      final existingEnd = DateTime.parse(period['end_date']);
+      final es = DateTime(existingStart.year, existingStart.month, existingStart.day);
+      final ee = DateTime(existingEnd.year, existingEnd.month, existingEnd.day);
+      if (!s.isAfter(ee) && !e.isBefore(es)) return true;
+    }
+    return false;
+  }
+
+  void _showOverlapError() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Period dates overlap with an existing entry!"),
+        backgroundColor: Colors.redAccent,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return "${months[date.month - 1]} ${date.day}";
+  }
+
+  String _formatRange(DateTime start, DateTime end) {
+    return "${_formatDate(start)} - ${_formatDate(end)}";
+  }
+
+  Future<void> _saveSettings() async {
+    if (_userId != null) {
+      await _dbHelper.saveCycleInfo({
+        'user_id': _userId,
+        'last_period_date': _lastPeriodDate.toIso8601String(),
+        'cycle_length': _cycleLength,
+        'period_length': _periodLength,
+      });
+      setState(() {});
+    }
+  }
+
+  Future<void> _addPeriod() async {
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: Color(0xFFE55F81)),
+        ),
+        child: child!,
+      ),
+    );
+
+    if (picked != null && _userId != null) {
+      final start = DateTime(picked.start.year, picked.start.month, picked.start.day);
+      final end = DateTime(picked.end.year, picked.end.month, picked.end.day);
+
+      if (_isOverlapping(start, end)) {
+        _showOverlapError();
+        return;
+      }
+
+      await _dbHelper.savePeriod({
+        'user_id': _userId,
+        'start_date': start.toIso8601String(),
+        'end_date': end.toIso8601String(),
+      });
+      if (start.isAfter(_lastPeriodDate) || start.isAtSameMomentAs(_lastPeriodDate)) {
+        await _dbHelper.saveCycleInfo({
+          'user_id': _userId,
+          'last_period_date': start.toIso8601String(),
+          'cycle_length': _cycleLength,
+          'period_length': (end.difference(start).inDays + 1),
+        });
+      }
+      _loadAllData();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      physics: const ClampingScrollPhysics(),
-      padding: const EdgeInsets.all(16.0),
-      child: Column(
+    if (_isLoading) return const Center(child: CircularProgressIndicator());
+
+    return Container(
+      color: const Color(0xFFFFF9FA),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Column(
           children: [
-            _buildStatusCard(),
             const SizedBox(height: 20),
-            _buildCalendarCard(),
-            const SizedBox(height: 20),
-            _buildDailyLogs(),
-            const SizedBox(height: 20),
-            _buildCycleAnalysis(),
-            const SizedBox(height: 20),
-            _buildDailyInsight(),
-            const SizedBox(height: 20),
+            const Text("PERIOD", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.2)),
+            Text(
+              _daysUntilNextPeriod == 0 ? "STARTS TODAY" : "$_daysUntilNextPeriod DAYS LEFT",
+              style: const TextStyle(fontSize: 38, fontWeight: FontWeight.w900, color: Colors.black),
+            ),
+            Text("${_formatDate(_nextPeriodDate)} - Next Period", style: const TextStyle(fontSize: 14, color: Colors.grey)),
+            const SizedBox(height: 25),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                _buildSettingInput("CYCLE LENGTH", _cycleController, (val) {
+                  int? newVal = int.tryParse(val);
+                  if (newVal != null && newVal > 0) {
+                    _cycleLength = newVal;
+                    _saveSettings();
+                  }
+                }),
+                _buildSettingInput("PERIOD LENGTH", _periodController, (val) {
+                  int? newVal = int.tryParse(val);
+                  if (newVal != null && newVal > 0) {
+                    _periodLength = newVal;
+                    _saveSettings();
+                  }
+                }),
+              ],
+            ),
+            const SizedBox(height: 25),
+            ElevatedButton(
+              onPressed: () async {
+                final DateTime? picked = await showDatePicker(
+                  context: context,
+                  initialDate: DateTime.now(),
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now(),
+                  builder: (context, child) => Theme(
+                    data: Theme.of(context).copyWith(
+                      colorScheme: const ColorScheme.light(primary: Color(0xFFE55F81)),
+                    ),
+                    child: child!,
+                  ),
+                );
+
+                if (picked != null && _userId != null) {
+                  final start = DateTime(picked.year, picked.month, picked.day);
+                  final end = start.add(Duration(days: _periodLength - 1));
+
+                  if (_isOverlapping(start, end)) {
+                    _showOverlapError();
+                    return;
+                  }
+
+                  await _dbHelper.savePeriod({
+                    'user_id': _userId,
+                    'start_date': start.toIso8601String(),
+                    'end_date': end.toIso8601String(),
+                  });
+                  if (start.isAfter(_lastPeriodDate) || start.isAtSameMomentAs(_lastPeriodDate)) {
+                    await _dbHelper.saveCycleInfo({
+                      'user_id': _userId,
+                      'last_period_date': start.toIso8601String(),
+                      'cycle_length': _cycleLength,
+                      'period_length': _periodLength,
+                    });
+                  }
+                  _loadAllData();
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE55F81),
+                minimumSize: const Size(220, 54),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                elevation: 4,
+                shadowColor: const Color(0xFFE55F81).withOpacity(0.4),
+              ),
+              child: const Text("Period Starts", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+            const SizedBox(height: 35),
+            Row(
+              children: [
+                Expanded(child: _buildCycleDayCard()),
+                const SizedBox(width: 15),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _buildSmallCard("NEXT PERIOD", _formatDate(_nextPeriodDate), const Color(0xFFFFF0F3), const Color(0xFFE55F81)),
+                      const SizedBox(height: 15),
+                      _buildSmallCard("NEXT FERTILE", _formatDate(_nextFertileDate), const Color(0xFFFFF5EC), const Color(0xFFF4A261)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 25),
+            _buildMyCyclesCard(),
+            const SizedBox(height: 30),
+            _buildHistorySection(),
+            const SizedBox(height: 40),
           ],
         ),
-      );
-    }
+      ),
+    );
+  }
 
-  Widget _buildStatusCard() {
+  Widget _buildCycleDayCard() {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      height: 180,
+      padding: const EdgeInsets.all(15),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(15),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            "CURRENT STATUS",
-            style: TextStyle(color: Colors.grey, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.2),
-          ),
-          const SizedBox(height: 12),
-          RichText(
-            text: TextSpan(
-              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.black),
-              children: [
-                TextSpan(text: _daysUntilNextPeriod == 0 ? "Period " : "Period in "),
-                TextSpan(
-                  text: _daysUntilNextPeriod == 0 ? "Today" : "$_daysUntilNextPeriod\ndays", 
-                  style: const TextStyle(color: Color(0xFFD81B60))
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-          RichText(
-            text: TextSpan(
-              style: const TextStyle(color: Colors.grey, fontSize: 14),
-              children: [
-                const TextSpan(text: "Your cycle is regular. Phase: "),
-                TextSpan(text: _currentPhase, style: TextStyle(color: _phaseColor, fontWeight: FontWeight.bold)),
-                const TextSpan(text: ". Drink plenty of water and rest."),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => _showLogPeriodDialog(),
-            icon: const Icon(Icons.calendar_today, size: 18),
-            label: const Text("Log Period Start"),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFD81B60),
-              foregroundColor: Colors.white,
-              minimumSize: const Size(180, 48),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-            ),
-          ),
-          const SizedBox(height: 32),
+          const Text("CYCLE\nDAY", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+          const Spacer(),
           Center(
             child: Stack(
               alignment: Alignment.center,
               children: [
                 SizedBox(
-                  width: 140,
-                  height: 140,
+                  width: 90,
+                  height: 90,
                   child: CircularProgressIndicator(
                     value: _currentDay / _cycleLength,
-                    strokeWidth: 12,
+                    strokeWidth: 9,
                     backgroundColor: Colors.grey[100],
-                    valueColor: AlwaysStoppedAnimation<Color>(_phaseColor),
+                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFFB0003A)),
                     strokeCap: StrokeCap.round,
                   ),
                 ),
-                Column(
+                Text("$_currentDay", style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+              ],
+            ),
+          ),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSmallCard(String title, String date, Color bgColor, Color textColor) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(15)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(title, style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: textColor.withOpacity(0.8))),
+          const SizedBox(height: 8),
+          Text(date, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingInput(String label, TextEditingController controller, Function(String) onChanged) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 1.1)),
+        const SizedBox(height: 8),
+        Container(
+          width: 70,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))],
+          ),
+          child: TextField(
+            controller: controller,
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(vertical: 8),
+              isDense: true,
+            ),
+            onChanged: onChanged,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMyCyclesCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text("My cycles", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          Text("${_pastPeriods.length} cycles logged", style: const TextStyle(fontSize: 12, color: Colors.grey)),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(child: _buildAverageCard(Icons.water_drop, "${_avgPeriod.toStringAsFixed(0)} Days", "AVERAGE PERIOD", const Color(0xFFFFF0F3), const Color(0xFFE55F81))),
+              const SizedBox(width: 15),
+              Expanded(child: _buildAverageCard(Icons.refresh, "${_avgCycle.toStringAsFixed(0)} Days", "AVERAGE CYCLE", const Color(0xFFFFF5EC), const Color(0xFFF4A261))),
+            ],
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _addPeriod,
+              icon: const Icon(Icons.add, color: Colors.white),
+              label: const Text("Add Period", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE55F81),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 15),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAverageCard(IconData icon, String value, String label, Color bgColor, Color iconColor) {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(color: bgColor, borderRadius: BorderRadius.circular(15)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: iconColor, size: 24),
+          const SizedBox(height: 12),
+          Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: iconColor)),
+          Text(label, style: const TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.grey)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHistorySection() {
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text("History", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                const Text("Prediction", style: TextStyle(color: Colors.grey)),
+                Icon(Icons.keyboard_arrow_down, color: Colors.grey[400]),
+              ],
+            ),
+          ],
+        ),
+        const SizedBox(height: 15),
+        Align(alignment: Alignment.centerLeft, child: Text("${DateTime.now().year}", style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey))),
+        const SizedBox(height: 15),
+        if (_pastPeriods.isEmpty) const Text("No history found.", style: TextStyle(color: Colors.grey)),
+        ..._pastPeriods.map((p) => _buildHistoryItem(p)).toList(),
+      ],
+    );
+  }
+
+  Widget _buildHistoryItem(Map<String, dynamic> period) {
+    final start = DateTime.parse(period['start_date']);
+    final end = DateTime.parse(period['end_date']);
+    final periodDuration = end.difference(start).inDays + 1;
+    
+    int cycleDays = 28;
+    int index = _pastPeriods.indexOf(period);
+    if (index < _pastPeriods.length - 1) {
+      final prevStart = DateTime.parse(_pastPeriods[index+1]['start_date']);
+      cycleDays = start.difference(prevStart).inDays;
+    }
+    if (cycleDays <= 0) cycleDays = 28;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 15),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 5,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_formatRange(start, end), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 10),
+                Stack(
+                  alignment: Alignment.centerLeft,
                   children: [
-                    const Text("Day", style: TextStyle(color: Colors.grey, fontSize: 14)),
-                    Text(
-                      "$_currentDay",
-                      style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.grey[800]),
+                    Container(height: 16, width: double.infinity, decoration: BoxDecoration(color: const Color(0xFFFFF0F3), borderRadius: BorderRadius.circular(8))),
+                    Container(
+                      height: 16, 
+                      width: (periodDuration / cycleDays) * 200, 
+                      decoration: BoxDecoration(color: const Color(0xFFE55F81), borderRadius: BorderRadius.circular(8)),
+                      child: Center(child: Text("$periodDuration", style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold))),
+                    ),
+                    Positioned(
+                      left: (14 / cycleDays) * 200, 
+                      child: Container(
+                        height: 14,
+                        width: 14,
+                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        child: Center(child: Container(height: 8, width: 8, decoration: const BoxDecoration(color: Color(0xFFF4A261), shape: BoxShape.circle))),
+                      ),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  void _showLogPeriodDialog() {
-    showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now().subtract(const Duration(days: 90)),
-      lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(primary: Color(0xFFD81B60)),
-          ),
-          child: child!,
-        );
-      },
-    ).then((date) {
-      if (date != null) _savePeriodDate(date);
-    });
-  }
-
-  Widget _buildCalendarCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        children: [
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          const SizedBox(width: 15),
+          Column(
             children: [
-              Text(
-                "Cycle Overview",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              Icon(Icons.info_outline, color: Colors.grey, size: 20),
+              Text("$cycleDays", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Text("DAYS", style: TextStyle(fontSize: 9, color: Colors.grey, fontWeight: FontWeight.bold)),
             ],
-          ),
-          const SizedBox(height: 24),
-          _buildCalendarGrid(),
-          const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildLegend(const Color(0xFFFFEBEE), "Period"),
-              const SizedBox(width: 20),
-              _buildLegend(const Color(0xFFF3E5F5), "Ovulation"),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLegend(Color color, String label) {
-    return Row(
-      children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-        const SizedBox(width: 8),
-        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-      ],
-    );
-  }
-
-  Widget _buildCalendarGrid() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
-      children: List.generate(7, (index) {
-        DateTime date = DateTime.now().add(Duration(days: index - 3));
-        int dayOfCycle = (date.difference(_lastPeriodDate).inDays % _cycleLength) + 1;
-        bool isPeriod = dayOfCycle <= _periodLength;
-        bool isToday = index == 3;
-
-        return Column(
-          children: [
-            Text(
-              ["M", "T", "W", "T", "F", "S", "S"][date.weekday - 1],
-              style: const TextStyle(fontSize: 10, color: Colors.grey, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isToday 
-                    ? const Color(0xFFD81B60) 
-                    : isPeriod ? const Color(0xFFFFEBEE) : Colors.transparent,
-                shape: BoxShape.circle,
-                border: isToday ? null : Border.all(color: Colors.grey[200]!),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                "${date.day}",
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
-                  color: isToday ? Colors.white : Colors.black87,
-                ),
-              ),
-            ),
-          ],
-        );
-      }),
-    );
-  }
-
-  Widget _buildDailyLogs() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(left: 4.0, bottom: 12),
-          child: Text("Daily Logs", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-        ),
-        GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: 2,
-          mainAxisSpacing: 12,
-          crossAxisSpacing: 12,
-          childAspectRatio: 1.6,
-          children: [
-            _buildLogItem(Icons.sentiment_satisfied_alt, "MOOD", const Color(0xFFFCE4EC), const Color(0xFFD81B60)),
-            _buildLogItem(Icons.medical_services, "SYMPTOMS", const Color(0xFFF5F5F5), const Color(0xFFC2185B)),
-            _buildLogItem(Icons.water_drop, "FLOW", const Color(0xFFFCE4EC), const Color(0xFFD81B60)),
-            _buildLogItem(Icons.favorite, "SEXUAL\nACTIVITY", const Color(0xFFF5F5F5), const Color(0xFFC2185B)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildLogItem(IconData icon, String label, Color bgColor, Color iconColor) {
-    return InkWell(
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Logged $label for today"), duration: const Duration(seconds: 1)),
-        );
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: iconColor, size: 24),
-            const SizedBox(height: 8),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey[700]),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCycleAnalysis() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF9C27B0), Color(0xFFBA68C8)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("Cycle Analysis", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          Text(
-            _currentDay > 14 
-                ? "Your follicular window has passed. Logged activities optimized."
-                : "Your fertile window starts in ${max(0, 14 - _currentDay)} days.",
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (context) => const CycleReportScreen()),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white.withAlpha(50),
-              foregroundColor: Colors.white,
-              elevation: 0,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text("View Detailed Report", style: TextStyle(fontSize: 12)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDailyInsight() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFCE4EC),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-            child: const Icon(Icons.lightbulb, color: Color(0xFFD81B60), size: 20),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("Daily Insight", style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD81B60))),
-                Text(
-                  _currentPhase == "Menstrual Phase" 
-                    ? "Magnesium-rich foods can help ease the cramps you might feel today."
-                    : "Staying active during the $_currentPhase boosts your energy levels.",
-                  style: const TextStyle(fontSize: 11, color: Colors.grey),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class CycleReportScreen extends StatelessWidget {
-  const CycleReportScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text("Cycle Analysis Report", style: TextStyle(fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        elevation: 0,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              "Monthly Summary",
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              "Based on your last 3 months of data",
-              style: TextStyle(color: Colors.grey),
-            ),
-            const SizedBox(height: 32),
-            _buildStatRow("Average Cycle Length", "28 Days"),
-            _buildStatRow("Average Period Length", "5 Days"),
-            _buildStatRow("Cycle Regularity", "94%"),
-            const SizedBox(height: 40),
-            const Text(
-              "Phase Breakdown",
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            _buildPhaseBar("Menstrual", 0.18, const Color(0xFFD81B60)),
-            _buildPhaseBar("Follicular", 0.32, const Color(0xFF9C27B0)),
-            _buildPhaseBar("Ovulatory", 0.10, const Color(0xFFBA68C8)),
-            _buildPhaseBar("Luteal", 0.40, const Color(0xFFCE93D8)),
-            const SizedBox(height: 40),
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFCE4EC),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    "Health Insights",
-                    style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFFD81B60), fontSize: 16),
-                  ),
-                  SizedBox(height: 12),
-                  Text(
-                    "• Your cycle is extremely consistent.\n• Mood swings are most common during the Luteal phase.\n• Hydration levels have been 15% higher this month compared to last.",
-                    style: TextStyle(color: Colors.black87, height: 1.6),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 40),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 16, color: Colors.grey)),
-          Text(value, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPhaseBar(String label, double percentage, Color color) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              Text("${(percentage * 100).toInt()}%", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          LinearProgressIndicator(
-            value: percentage,
-            color: color,
-            backgroundColor: color.withOpacity(0.1),
-            minHeight: 8,
-            borderRadius: BorderRadius.circular(4),
           ),
         ],
       ),

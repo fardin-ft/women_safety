@@ -12,6 +12,7 @@ class SignupScreen extends StatefulWidget {
 class _SignupScreenState extends State<SignupScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _dbHelper = DatabaseHelper();
@@ -20,10 +21,11 @@ class _SignupScreenState extends State<SignupScreen> {
   Future<void> _signup() async {
     final name = _nameController.text.trim();
     final email = _emailController.text.trim();
+    final phone = _phoneController.text.trim();
     final password = _passwordController.text.trim();
     final confirmPassword = _confirmPasswordController.text.trim();
 
-    if (name.isEmpty || email.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
+    if (name.isEmpty || email.isEmpty || phone.isEmpty || password.isEmpty || confirmPassword.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please fill in all fields")),
       );
@@ -39,7 +41,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
     setState(() => _isLoading = true);
 
-    final result = await _dbHelper.registerUser(name, email, password);
+    final result = await _dbHelper.registerUser(name, email, password, phone: phone);
 
     setState(() => _isLoading = false);
 
@@ -99,6 +101,16 @@ class _SignupScreenState extends State<SignupScreen> {
               decoration: InputDecoration(
                 hintText: "Email",
                 prefixIcon: const Icon(Icons.email_outlined),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              decoration: InputDecoration(
+                hintText: "Phone Number",
+                prefixIcon: const Icon(Icons.phone_outlined),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
               ),
             ),
